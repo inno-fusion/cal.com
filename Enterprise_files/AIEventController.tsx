@@ -4,21 +4,21 @@ import React, { useState } from "react";
 import { useFormContext, Controller } from "react-hook-form";
 import { z } from "zod";
 
+import PhoneInput from "@calcom/features/components/phone-input";
 import { getTemplateFieldsSchema } from "@calcom/features/calAIPhone/getTemplateFieldsSchema";
 import { templateFieldsMap } from "@calcom/features/calAIPhone/template-fields-map";
 import type { TemplateType } from "@calcom/features/calAIPhone/zod-utils";
-import PhoneInput from "@calcom/features/components/phone-input";
 import LicenseRequired from "@calcom/features/ee/common/components/LicenseRequired";
 import type { EventTypeSetup, FormValues } from "@calcom/features/eventtypes/lib/types";
 import { ComponentForField } from "@calcom/features/form-builder/FormBuilderField";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { trpc } from "@calcom/trpc/react";
-import classNames from "@calcom/ui/classNames";
-import { Button } from "@calcom/ui/components/button";
-import { Divider } from "@calcom/ui/components/divider";
-import { EmptyScreen } from "@calcom/ui/components/empty-screen";
 import { Label } from "@calcom/ui/components/form";
+import { Divider } from "@calcom/ui/components/divider";
 import { TextField } from "@calcom/ui/components/form";
+import { Button } from "@calcom/ui/components/button";
+import classNames from "@calcom/ui/classNames";
+import { EmptyScreen } from "@calcom/ui/components/empty-screen";
 import { SettingsToggle } from "@calcom/ui/components/form";
 import { Icon } from "@calcom/ui/components/icon";
 import { showToast } from "@calcom/ui/components/toast";
@@ -35,17 +35,14 @@ export default function AIEventController({ eventType, isTeamEvent }: AIEventCon
   const formMethods = useFormContext<FormValues>();
 
   // ENTERPRISE FEATURES BYPASS: Allow AI features when enterprise features are enabled
-  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
-  const hasOrgId = !!session.data?.user?.org?.id;
-  const isOrg = hasOrgId || enterpriseBypass;
+  const isOrg = !!session.data?.user?.org?.id || process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
 
   if (session.status === "loading") return <></>;
 
   return (
     <LicenseRequired>
       <div className="block items-start sm:flex">
-        {/* ENTERPRISE FEATURES BYPASS: Show AI UI when enterprise features enabled */}
-        {(!isOrg || !isTeamEvent) && !enterpriseBypass ? (
+        {!isOrg || !isTeamEvent ? (
           <EmptyScreen
             headline={t("Cal.ai")}
             Icon="sparkles"
@@ -109,7 +106,7 @@ const TemplateFields = () => {
   const fields = templateFieldsMap[templateType as TemplateType];
 
   return (
-    <div className="stack-y-4">
+    <div className="space-y-4">
       {fields?.map((field) => (
         <div key={field.name}>
           <Controller
@@ -203,7 +200,7 @@ const AISettings = ({ eventType }: { eventType: EventTypeSetup }) => {
 
   return (
     <div>
-      <div className="stack-y-4">
+      <div className="space-y-4">
         <>
           <Label>{t("your_phone_number")}</Label>
           <Controller

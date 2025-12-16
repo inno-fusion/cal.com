@@ -22,12 +22,12 @@ export class DeploymentsService {
     if (this.configService.get("e2e")) {
       return true;
     }
-
+    
     /** Enterprise features enabled via env variable */
     if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
       return true;
     }
-
+    
     let licenseKey = this.configService.get("api.licenseKey");
 
     if (!licenseKey) {

@@ -16,23 +16,21 @@ const DirectorySync = ({ permissions }: { permissions?: { canEdit: boolean } }) 
   const { t } = useLocale();
   const router = useRouter();
 
-  // ENTERPRISE FEATURES BYPASS: Always allow DSYNC access when enterprise features enabled
-  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
-
   const { data: currentOrg, isLoading, error } = trpc.viewer.organizations.listCurrent.useQuery();
 
   useEffect(() => {
-    if (!HOSTED_CAL_FEATURES && !enterpriseBypass) {
+    // ENTERPRISE FEATURES BYPASS: Allow dsync when enterprise features enabled
+    if (!HOSTED_CAL_FEATURES && process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES !== "1") {
       router.push("/404");
     }
-  }, [router, enterpriseBypass]);
+  }, [router]);
 
   if (isLoading) {
     return <SkeletonLoader />;
   }
 
-  // ENTERPRISE FEATURES BYPASS: Skip org check when enterprise features enabled
-  if (!currentOrg?.id && !enterpriseBypass) {
+  // ENTERPRISE FEATURES BYPASS: Skip org requirement when enterprise features enabled
+  if (!currentOrg?.id && process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES !== "1") {
     router.push("/404");
   }
 
@@ -40,14 +38,16 @@ const DirectorySync = ({ permissions }: { permissions?: { canEdit: boolean } }) 
     showToast(error.message, "error");
   }
 
-  // ENTERPRISE FEATURES BYPASS: Skip permissions check when enterprise features enabled
-  if (!permissions?.canEdit && !enterpriseBypass) {
+  if (!permissions?.canEdit) {
     router.push("/404");
   }
 
   return (
     <div className="bg-default w-full sm:mx-0 xl:mt-0">
-      {(HOSTED_CAL_FEATURES || enterpriseBypass) && <ConfigureDirectorySync organizationId={currentOrg?.id || null} />}
+      {/* ENTERPRISE FEATURES BYPASS: Show dsync UI when enterprise features enabled */}
+      {(HOSTED_CAL_FEATURES || process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") && (
+        <ConfigureDirectorySync organizationId={currentOrg?.id || null} />
+      )}
       {/* TODO add additional settings for dsync */}
       {/* <SettingsToggle
         toggleSwitchAtTheEnd={true}

@@ -26,8 +26,7 @@ function ConnectAndJoin() {
   const session = useSession();
   // ENTERPRISE FEATURES BYPASS: Allow instant meeting join when enterprise features are enabled
   const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
-  const hasOrg = session.status === "authenticated" && !!session.data.user?.org;
-  const isUserPartOfOrg = hasOrg || enterpriseBypass;
+  const isUserPartOfOrg = (session.status === "authenticated" && !!session.data.user?.org) || enterpriseBypass;
 
   const mutation = trpc.viewer.loggedInViewerRouter.connectAndJoin.useMutation({
     onSuccess: (res) => {

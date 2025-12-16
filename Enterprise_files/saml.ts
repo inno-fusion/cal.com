@@ -1,8 +1,7 @@
 import type { SAMLSSORecord, OIDCSSORecord } from "@boxyhq/saml-jackson";
 
-import { PermissionCheckService } from "@calcom/features/pbac/services/permission-check.service";
 import { HOSTED_CAL_FEATURES } from "@calcom/lib/constants";
-import { MembershipRole } from "@calcom/prisma/enums";
+import { isTeamAdmin } from "@calcom/lib/server/queries/teams";
 
 export const samlDatabaseUrl = process.env.SAML_DATABASE_URL || "";
 export const isSAMLLoginEnabled = samlDatabaseUrl.length > 0;
@@ -29,17 +28,8 @@ export const isSAMLAdmin = (email: string) => {
   return false;
 };
 
-export const canAccessOrganization = async (user: { id: number; email: string }, teamId: number | null) => {
+export const canAccess = async (user: { id: number; email: string }, teamId: number | null) => {
   const { id: userId, email } = user;
-
-  // ENTERPRISE FEATURES BYPASS: Always allow access when enterprise features are enabled
-  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
-  if (enterpriseBypass) {
-    return {
-      message: "success",
-      access: true,
-    };
-  }
 
   if (!isSAMLLoginEnabled) {
     return {
@@ -50,22 +40,7 @@ export const canAccessOrganization = async (user: { id: number; email: string },
 
   // Hosted
   if (HOSTED_CAL_FEATURES) {
-    if (teamId === null) {
-      return {
-        message: "dont_have_permission",
-        access: false,
-      };
-    }
-
-    const permissionCheckService = new PermissionCheckService();
-    const hasPermission = await permissionCheckService.checkPermission({
-      userId,
-      teamId,
-      permission: "organization.read",
-      fallbackRoles: [MembershipRole.OWNER, MembershipRole.ADMIN],
-    });
-
-    if (!hasPermission) {
+    if (teamId === null || !(await isTeamAdmin(userId, teamId))) {
       return {
         message: "dont_have_permission",
         access: false,
@@ -73,8 +48,8 @@ export const canAccessOrganization = async (user: { id: number; email: string },
     }
   }
 
-  // Self-hosted
-  if (!HOSTED_CAL_FEATURES) {
+  // Self-hosted - ENTERPRISE FEATURES BYPASS: Allow SAML when enterprise features enabled
+  if (!HOSTED_CAL_FEATURES && process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES !== "1") {
     if (!isSAMLAdmin(email)) {
       return {
         message: "dont_have_permission",

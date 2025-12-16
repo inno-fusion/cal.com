@@ -81,7 +81,7 @@ class LicenseKeyService implements ILicenseKeyService {
   public static async validateLicenseKey(licenseKey: string): Promise<boolean> {
     /** We skip for E2E testing */
     if (process.env.NEXT_PUBLIC_IS_E2E === "1") return true;
-
+    
     /** Enterprise features enabled via env variable */
     if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return true;
 
@@ -95,7 +95,7 @@ class LicenseKeyService implements ILicenseKeyService {
     if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
       return { success: true, bypassed: true };
     }
-
+    
     try {
       const response = await this.fetcher({
         url: `${this.baseUrl}/v1/license/usage/increment?event=${usageEvent ?? UsageEvent.BOOKING}`,
@@ -115,10 +115,10 @@ class LicenseKeyService implements ILicenseKeyService {
   async checkLicense(): Promise<boolean> {
     /** We skip for E2E testing */
     if (process.env.NEXT_PUBLIC_IS_E2E === "1") return true;
-
+    
     /** Enterprise features enabled via env variable */
     if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return true;
-
+    
     /** We check first on env */
     const url = `${this.baseUrl}/v1/license/${this.licenseKey}`;
     const cachedResponse = cache.get(url);

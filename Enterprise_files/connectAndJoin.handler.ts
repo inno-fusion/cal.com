@@ -27,8 +27,7 @@ export const Handler = async ({ ctx, input }: Options) => {
 
   // ENTERPRISE FEATURES BYPASS: Allow instant meeting join when enterprise features are enabled
   const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
-  const hasOrgId = !!user.organization.id;
-  const isLoggedInUserPartOfOrg = hasOrgId || enterpriseBypass;
+  const isLoggedInUserPartOfOrg = !!user.organization.id || enterpriseBypass;
 
   if (!isLoggedInUserPartOfOrg) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Logged in user is not member of Organization" });
@@ -217,7 +216,6 @@ export const Handler = async ({ ctx, input }: Options) => {
     eventTypeId: eventType?.id,
     videoCallData,
     customReplyToEmail: eventType?.customReplyToEmail,
-    organizationId: user?.organizationId ?? null,
     team: updatedBooking.eventType?.team
       ? {
           name: updatedBooking.eventType.team.name,

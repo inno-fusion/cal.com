@@ -21,7 +21,7 @@ const LicenseRequired = ({ children, as = "", ...rest }: LicenseRequiredProps) =
   const session = useSession();
   const { t } = useLocale();
   const Component = as || Fragment;
-
+  
   // Enterprise features enabled via env variable
   const enterpriseFeaturesEnabled = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
   const sessionLicenseValid = session.data ? session.data.hasValidLicense : null;

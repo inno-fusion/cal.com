@@ -3,9 +3,9 @@ import type { Dispatch, SetStateAction } from "react";
 import { useFormContext } from "react-hook-form";
 import z from "zod";
 
-import { LastUsed, useLastUsed } from "@calcom/features/auth/lib/hooks/useLastUsed";
 import { HOSTED_CAL_FEATURES } from "@calcom/lib/constants";
 import { emailRegex } from "@calcom/lib/emailSchema";
+import { LastUsed, useLastUsed } from "@calcom/lib/hooks/useLastUsed";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { trpc } from "@calcom/trpc/react";
 import type { ButtonProps } from "@calcom/ui/components/button";
@@ -41,9 +41,6 @@ export function SAMLLogin({
     },
   });
 
-  // ENTERPRISE FEATURES BYPASS: Allow SAML login when enterprise features are enabled
-  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || true; // Hardcoded bypass
-
   return (
     <Button
       StartIcon="lock"
@@ -53,7 +50,8 @@ export function SAMLLogin({
       onClick={async (event) => {
         event.preventDefault();
 
-        if (!HOSTED_CAL_FEATURES && !enterpriseBypass) {
+        // ENTERPRISE FEATURES BYPASS: Allow SAML when enterprise features enabled  
+        if (!HOSTED_CAL_FEATURES && process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES !== "1") {
           await signIn("saml", {}, { tenant: samlTenantID, product: samlProductID });
           return;
         }
