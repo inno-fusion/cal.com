@@ -30,6 +30,7 @@ export type AppConfig = {
   };
   app: {
     baseUrl: string;
+    hostedCalFeatures: string;
   };
   e2e: boolean;
 };

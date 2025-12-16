@@ -24,7 +24,11 @@ type Options = {
 export const Handler = async ({ ctx, input }: Options) => {
   const { token } = input;
   const { user } = ctx;
-  const isLoggedInUserPartOfOrg = !!user.organization.id;
+
+  // ENTERPRISE BYPASS: Allow instant meeting join when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  const hasOrgId = !!user.organization.id;
+  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+  const isLoggedInUserPartOfOrg = hasOrgId || enterpriseBypass;
 
   if (!isLoggedInUserPartOfOrg) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Logged in user is not member of Organization" });

@@ -38,6 +38,10 @@ export function collectPageParameters(
 }
 
 const reportUsage: EventHandler = async (event, { fetch }) => {
+  // ENTERPRISE BYPASS: Skip usage reporting when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
+    return Promise.resolve();
+  }
   const ets = telemetryEventTypes;
   if ([ets.bookingConfirmed, ets.embedBookingConfirmed].includes(event.eventType)) {
     const key = process.env.CALCOM_LICENSE_KEY;
@@ -53,10 +57,19 @@ const reportUsage: EventHandler = async (event, { fetch }) => {
   }
 };
 
+// ENTERPRISE BYPASS: Check if telemetry should be disabled
+const isTelemetryDisabled = () => process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+
 export const nextCollectBasicSettings: CollectOpts = {
   drivers: [
-    process.env.CALCOM_LICENSE_KEY && process.env.NEXT_PUBLIC_IS_E2E !== "1" ? reportUsage : undefined,
-    process.env.CALCOM_TELEMETRY_DISABLED === "1" || process.env.NEXT_PUBLIC_IS_E2E === "1"
+    // ENTERPRISE BYPASS: Disable usage reporting when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    process.env.CALCOM_LICENSE_KEY && process.env.NEXT_PUBLIC_IS_E2E !== "1" && !isTelemetryDisabled()
+      ? reportUsage
+      : undefined,
+    // ENTERPRISE BYPASS: Disable Jitsu telemetry when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    process.env.CALCOM_TELEMETRY_DISABLED === "1" ||
+    process.env.NEXT_PUBLIC_IS_E2E === "1" ||
+    isTelemetryDisabled()
       ? undefined
       : {
           type: "jitsu",

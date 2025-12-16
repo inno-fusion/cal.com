@@ -739,10 +739,43 @@ export const getOptions = ({
     },
     async session({ session, token, user }) {
       log.debug("callbacks:session - Session callback called", safeStringify({ session, token, user }));
-      const deploymentRepo = new DeploymentRepository(prisma);
-      const licenseKeyService = await LicenseKeySingleton.getInstance(deploymentRepo);
-      const hasValidLicense = await licenseKeyService.checkLicense();
+      // ENTERPRISE BYPASS: Skip license check when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+      let hasValidLicense: boolean;
+      if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
+        hasValidLicense = true;
+      } else {
+        const deploymentRepo = new DeploymentRepository(prisma);
+        const licenseKeyService = await LicenseKeySingleton.getInstance(deploymentRepo);
+        hasValidLicense = await licenseKeyService.checkLicense();
+      }
       const profileId = token.profileId;
+
+      // ENTERPRISE BYPASS: Inject fake org when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+      // This allows instant meetings and other org-only features to work without an actual org
+      const isEnterpriseBypass =
+        process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" &&
+        !token?.org &&
+        !session.user?.profile?.organizationId;
+
+      const orgData =
+        token?.org ||
+        (isEnterpriseBypass
+          ? {
+              id: 1,
+              name: "Enterprise",
+              slug: "enterprise",
+              logoUrl: null,
+              fullDomain: "",
+              domainSuffix: "",
+              role: "OWNER" as const,
+            }
+          : undefined);
+
+      // Inject organizationId into profile for enterprise bypass
+      const profileData = isEnterpriseBypass
+        ? { ...session.user?.profile, organizationId: 1 }
+        : session.user?.profile;
+
       const calendsoSession: Session = {
         ...session,
         profileId,
@@ -757,8 +790,9 @@ export const getOptions = ({
           role: token.role as UserPermissionRole,
           impersonatedBy: token.impersonatedBy,
           belongsToActiveTeam: token?.belongsToActiveTeam as boolean,
-          org: token?.org,
+          org: orgData,
           locale: token.locale,
+          profile: profileData,
         },
       };
       return calendsoSession;

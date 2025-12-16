@@ -40,13 +40,15 @@ export const CAL_URL = new URL(WEBAPP_URL).hostname.endsWith(".vercel.app")
   ? WEBAPP_URL
   : process.env.NEXT_PUBLIC_WEBSITE_URL || WEBAPP_URL;
 
+// ENTERPRISE BYPASS: Enable Cal.com features when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
 export const IS_CALCOM =
-  WEBAPP_URL &&
-  (new URL(WEBAPP_URL).hostname.endsWith("cal.com") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal.dev") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal.qa") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal-staging.com") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal.eu"));
+  process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" ||
+  (WEBAPP_URL &&
+    (new URL(WEBAPP_URL).hostname.endsWith("cal.com") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal.dev") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal.qa") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal-staging.com") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal.eu")));
 
 export const CONSOLE_URL =
   new URL(WEBAPP_URL).hostname.endsWith(".cal.dev") ||
@@ -68,7 +70,9 @@ export const MAX_EVENT_DURATION_MINUTES = 1440;
 /** Minimum duration allowed for an event in minutes */
 export const MIN_EVENT_DURATION_MINUTES = 1;
 
-export const HOSTED_CAL_FEATURES = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES || !IS_SELF_HOSTED;
+// ENTERPRISE BYPASS: Enable hosted/enterprise features when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+export const HOSTED_CAL_FEATURES =
+  process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" || !IS_SELF_HOSTED;
 
 export const PUBLIC_QUERY_RESERVATION_INTERVAL_SECONDS =
   parseInt(process.env.NEXT_PUBLIC_QUERY_RESERVATION_INTERVAL_SECONDS ?? "", 10) || 30;
@@ -115,10 +119,15 @@ export const IS_STRIPE_ENABLED = !!(
   process.env.STRIPE_PRIVATE_KEY
 );
 /** This has correct value only server side. When you want to use client side, go for IS_TEAM_BILLING_ENABLED_CLIENT. I think we should use the _CLIENT one only everywhere so that it works reliably everywhere on client as well as server  */
-export const IS_TEAM_BILLING_ENABLED = !!(IS_STRIPE_ENABLED && HOSTED_CAL_FEATURES);
+// ENTERPRISE BYPASS: Disable billing when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+export const IS_TEAM_BILLING_ENABLED =
+  process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" ? false : !!(IS_STRIPE_ENABLED && HOSTED_CAL_FEATURES);
 
+// ENTERPRISE BYPASS: Disable client-side billing when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
 export const IS_TEAM_BILLING_ENABLED_CLIENT =
-  !!process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY && HOSTED_CAL_FEATURES;
+  process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1"
+    ? false
+    : !!process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY && HOSTED_CAL_FEATURES;
 
 export const FULL_NAME_LENGTH_MAX_LIMIT = 50;
 export const API_NAME_LENGTH_MAX_LIMIT = 80;
@@ -170,7 +179,10 @@ export const BOOKER_NUMBER_OF_DAYS_TO_LOAD = parseInt(
 
 export const CLOUDFLARE_SITE_ID = process.env.NEXT_PUBLIC_CLOUDFLARE_SITEKEY;
 export const CLOUDFLARE_USE_TURNSTILE_IN_BOOKER = process.env.NEXT_PUBLIC_CLOUDFLARE_USE_TURNSTILE_IN_BOOKER;
-export const ORG_SELF_SERVE_ENABLED = process.env.NEXT_PUBLIC_ORG_SELF_SERVE_ENABLED === "1";
+// ENTERPRISE BYPASS: Enable organization self-serve when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+export const ORG_SELF_SERVE_ENABLED =
+  process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" ||
+  process.env.NEXT_PUBLIC_ORG_SELF_SERVE_ENABLED === "1";
 export const ORG_MINIMUM_PUBLISHED_TEAMS_SELF_SERVE = 0;
 export const ORG_MINIMUM_PUBLISHED_TEAMS_SELF_SERVE_HELPER_DIALOGUE = 1;
 

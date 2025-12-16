@@ -39,6 +39,7 @@ const loadConfig = (): AppConfig => {
     },
     app: {
       baseUrl: getEnv("WEB_APP_URL", "https://app.cal.com"),
+      hostedCalFeatures: getEnv("NEXT_PUBLIC_HOSTED_CAL_FEATURES", ""),
     },
     e2e: getEnv("IS_E2E", "false") === "true" ? true : false,
   };
