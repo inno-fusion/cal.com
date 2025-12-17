@@ -86,7 +86,8 @@ export default function InstantEventController({
 
   const instantLocked = shouldLockDisableProps("isInstantEvent");
 
-  const isOrg = !!session.data?.user?.org?.id;
+  // ENTERPRISE BYPASS: Allow instant meetings when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  const isOrg = !!session.data?.user?.org?.id || process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
 
   const { data, isPending } = trpc.viewer.availability.list.useQuery(undefined);
 

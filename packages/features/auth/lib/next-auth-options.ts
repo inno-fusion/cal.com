@@ -750,32 +750,6 @@ export const getOptions = ({
       }
       const profileId = token.profileId;
 
-      // ENTERPRISE BYPASS: Inject fake org when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
-      // This allows instant meetings and other org-only features to work without an actual org
-      const isEnterpriseBypass =
-        process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" &&
-        !token?.org &&
-        !session.user?.profile?.organizationId;
-
-      const orgData =
-        token?.org ||
-        (isEnterpriseBypass
-          ? {
-              id: 1,
-              name: "Enterprise",
-              slug: "enterprise",
-              logoUrl: null,
-              fullDomain: "",
-              domainSuffix: "",
-              role: "OWNER" as const,
-            }
-          : undefined);
-
-      // Inject organizationId into profile for enterprise bypass
-      const profileData = isEnterpriseBypass
-        ? { ...session.user?.profile, organizationId: 1 }
-        : session.user?.profile;
-
       const calendsoSession: Session = {
         ...session,
         profileId,
@@ -790,9 +764,8 @@ export const getOptions = ({
           role: token.role as UserPermissionRole,
           impersonatedBy: token.impersonatedBy,
           belongsToActiveTeam: token?.belongsToActiveTeam as boolean,
-          org: orgData,
+          org: token?.org,
           locale: token.locale,
-          profile: profileData,
         },
       };
       return calendsoSession;

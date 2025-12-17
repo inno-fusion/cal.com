@@ -92,30 +92,6 @@ export async function getServerSession(options: {
     upId,
   });
 
-  // ENTERPRISE BYPASS: Inject fake org when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
-  // This allows instant meetings and other org-only features to work without an actual org
-  const isEnterpriseBypass =
-    process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" && !token.org && !user.profile?.organizationId;
-
-  const orgData =
-    token.org ||
-    (isEnterpriseBypass
-      ? {
-          id: 1,
-          name: "Enterprise",
-          slug: "enterprise",
-          logoUrl: null,
-          fullDomain: "",
-          domainSuffix: "",
-          role: "OWNER" as const,
-        }
-      : undefined);
-
-  // Inject organizationId into profile for enterprise bypass
-  const profileData = isEnterpriseBypass
-    ? { ...user.profile, organizationId: 1 }
-    : user.profile;
-
   const session: Session = {
     hasValidLicense,
     expires: new Date(typeof token.exp === "number" ? token.exp * 1000 : Date.now()).toISOString(),
@@ -132,10 +108,10 @@ export async function getServerSession(options: {
         avatarUrl: user.avatarUrl,
       }),
       belongsToActiveTeam: token.belongsToActiveTeam,
-      org: orgData,
+      org: token.org,
       orgAwareUsername: token.orgAwareUsername,
       locale: user.locale ?? undefined,
-      profile: profileData,
+      profile: user.profile,
     },
     profileId: token.profileId,
     upId,
