@@ -50,7 +50,9 @@ export function SAMLLogin({
       onClick={async (event) => {
         event.preventDefault();
 
-        if (!HOSTED_CAL_FEATURES) {
+        // ENTERPRISE BYPASS: Allow SAML login when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+        const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+        if (!HOSTED_CAL_FEATURES && !enterpriseBypass) {
           await signIn("saml", {}, { tenant: samlTenantID, product: samlProductID });
           return;
         }

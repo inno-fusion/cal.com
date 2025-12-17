@@ -79,6 +79,8 @@ class LicenseKeyService implements ILicenseKeyService {
 
   // Static method to validate a license key directly
   public static async validateLicenseKey(licenseKey: string): Promise<boolean> {
+    // ENTERPRISE BYPASS: Return valid when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return true;
     /** We skip for E2E testing */
     if (process.env.NEXT_PUBLIC_IS_E2E === "1") return true;
 
@@ -88,6 +90,9 @@ class LicenseKeyService implements ILicenseKeyService {
   }
 
   async incrementUsage(usageEvent?: UsageEvent) {
+    // ENTERPRISE BYPASS: Skip usage tracking when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return Promise.resolve();
+
     try {
       const response = await this.fetcher({
         url: `${this.baseUrl}/v1/license/usage/increment?event=${usageEvent ?? UsageEvent.BOOKING}`,
@@ -105,6 +110,8 @@ class LicenseKeyService implements ILicenseKeyService {
   }
 
   async checkLicense(): Promise<boolean> {
+    // ENTERPRISE BYPASS: Return valid when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return true;
     /** We skip for E2E testing */
     if (process.env.NEXT_PUBLIC_IS_E2E === "1") return true;
     /** We check first on env */
@@ -130,6 +137,8 @@ export class NoopLicenseKeyService implements ILicenseKeyService {
   }
 
   async checkLicense(): Promise<boolean> {
+    // ENTERPRISE BYPASS: Return valid when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return Promise.resolve(true);
     return Promise.resolve(process.env.NEXT_PUBLIC_IS_E2E === "1");
   }
 }

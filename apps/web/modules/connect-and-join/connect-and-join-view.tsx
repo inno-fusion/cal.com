@@ -24,7 +24,8 @@ function ConnectAndJoin() {
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
 
   const session = useSession();
-  const isUserPartOfOrg = session.status === "authenticated" && !!session.data.user?.org;
+  // ENTERPRISE BYPASS: Always allow instant meeting join for self-hosted
+  const isUserPartOfOrg = (session.status === "authenticated" && !!session.data.user?.org) || true;
 
   const mutation = trpc.viewer.loggedInViewerRouter.connectAndJoin.useMutation({
     onSuccess: (res) => {
