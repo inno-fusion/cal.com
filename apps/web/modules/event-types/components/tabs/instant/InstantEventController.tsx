@@ -86,7 +86,8 @@ export default function InstantEventController({
 
   const instantLocked = shouldLockDisableProps("isInstantEvent");
 
-  const isOrg = !!session.data?.user?.org?.id;
+  // ENTERPRISE BYPASS: Always allow instant meetings for self-hosted
+  const isOrg = !!session.data?.user?.org?.id || true;
 
   const { data, isPending } = trpc.viewer.availability.list.useQuery(undefined);
 
@@ -104,7 +105,8 @@ export default function InstantEventController({
   return (
     <LicenseRequired>
       <div className="block items-start sm:flex">
-        {!isOrg || !isTeamEvent ? (
+        {/* ENTERPRISE BYPASS: Always show instant booking UI for self-hosted */}
+        {false && (!isOrg || !isTeamEvent) ? (
           <EmptyScreen
             headline={t("instant_tab_title")}
             Icon="phone-call"

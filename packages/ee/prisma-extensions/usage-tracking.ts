@@ -26,6 +26,11 @@ class InlineDeploymentRepository implements IDeploymentRepository {
 }
 
 async function incrementUsage(prismaClient: PrismaClient, event?: UsageEvent) {
+  // ENTERPRISE BYPASS: Skip usage tracking when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
+    return;
+  }
+
   const deploymentRepo = new InlineDeploymentRepository(prismaClient);
   try {
     const licenseKeyService = await LicenseKeySingleton.getInstance(deploymentRepo);

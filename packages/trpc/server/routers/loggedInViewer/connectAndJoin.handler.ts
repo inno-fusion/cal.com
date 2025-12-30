@@ -24,7 +24,9 @@ type Options = {
 export const Handler = async ({ ctx, input }: Options) => {
   const { token } = input;
   const { user } = ctx;
-  const isLoggedInUserPartOfOrg = !!user.organization.id;
+
+  // ENTERPRISE BYPASS: Always allow instant meeting join for self-hosted
+  const isLoggedInUserPartOfOrg = !!user.organization.id || true;
 
   if (!isLoggedInUserPartOfOrg) {
     throw new TRPCError({ code: "UNAUTHORIZED", message: "Logged in user is not member of Organization" });

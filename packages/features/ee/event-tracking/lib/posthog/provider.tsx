@@ -11,6 +11,8 @@ function Provider({ children }: { children: React.ReactNode }) {
   const { country } = useGeo();
 
   useEffect(() => {
+    // ENTERPRISE BYPASS: Skip PostHog initialization when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") return;
     if (!process.env.NEXT_PUBLIC_POSTHOG_KEY || initializeOnce.current) return;
 
     initializeOnce.current = true;

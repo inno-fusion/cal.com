@@ -16,19 +16,23 @@ const DirectorySync = ({ permissions }: { permissions?: { canEdit: boolean } }) 
   const { t } = useLocale();
   const router = useRouter();
 
+  // ENTERPRISE BYPASS: Always allow DSYNC access when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+
   const { data: currentOrg, isLoading, error } = trpc.viewer.organizations.listCurrent.useQuery();
 
   useEffect(() => {
-    if (!HOSTED_CAL_FEATURES) {
+    if (!HOSTED_CAL_FEATURES && !enterpriseBypass) {
       router.push("/404");
     }
-  }, [router]);
+  }, [router, enterpriseBypass]);
 
   if (isLoading) {
     return <SkeletonLoader />;
   }
 
-  if (!currentOrg?.id) {
+  // ENTERPRISE BYPASS: Skip org check when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  if (!currentOrg?.id && !enterpriseBypass) {
     router.push("/404");
   }
 
@@ -36,13 +40,14 @@ const DirectorySync = ({ permissions }: { permissions?: { canEdit: boolean } }) 
     showToast(error.message, "error");
   }
 
-  if (!permissions?.canEdit) {
+  // ENTERPRISE BYPASS: Skip permissions check when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  if (!permissions?.canEdit && !enterpriseBypass) {
     router.push("/404");
   }
 
   return (
     <div className="bg-default w-full sm:mx-0 xl:mt-0">
-      {HOSTED_CAL_FEATURES && <ConfigureDirectorySync organizationId={currentOrg?.id || null} />}
+      {(HOSTED_CAL_FEATURES || enterpriseBypass) && <ConfigureDirectorySync organizationId={currentOrg?.id || null} />}
       {/* TODO add additional settings for dsync */}
       {/* <SettingsToggle
         toggleSwitchAtTheEnd={true}

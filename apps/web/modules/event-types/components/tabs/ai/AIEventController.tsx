@@ -34,14 +34,16 @@ export default function AIEventController({ eventType, isTeamEvent }: AIEventCon
   const [aiEventState, setAIEventState] = useState<boolean>(eventType?.aiPhoneCallConfig?.enabled ?? false);
   const formMethods = useFormContext<FormValues>();
 
-  const isOrg = !!session.data?.user?.org?.id;
+  // ENTERPRISE BYPASS: Always allow AI features for self-hosted
+  const isOrg = !!session.data?.user?.org?.id || true;
 
   if (session.status === "loading") return <></>;
 
   return (
     <LicenseRequired>
       <div className="block items-start sm:flex">
-        {!isOrg || !isTeamEvent ? (
+        {/* ENTERPRISE BYPASS: Always show AI UI for self-hosted */}
+        {false && (!isOrg || !isTeamEvent) ? (
           <EmptyScreen
             headline={t("Cal.ai")}
             Icon="sparkles"

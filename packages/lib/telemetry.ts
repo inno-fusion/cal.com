@@ -38,6 +38,10 @@ export function collectPageParameters(
 }
 
 const reportUsage: EventHandler = async (event, { fetch }) => {
+  // ENTERPRISE BYPASS: Skip usage reporting when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
+    return Promise.resolve();
+  }
   const ets = telemetryEventTypes;
   if ([ets.bookingConfirmed, ets.embedBookingConfirmed].includes(event.eventType)) {
     const key = process.env.CALCOM_LICENSE_KEY;
