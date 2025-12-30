@@ -51,13 +51,15 @@ export const CAL_URL = new URL(WEBAPP_URL).hostname.endsWith(".vercel.app")
   ? WEBAPP_URL
   : ensureProtocol(process.env.NEXT_PUBLIC_WEBSITE_URL) || WEBAPP_URL;
 
+// ENTERPRISE BYPASS: Enable Cal.com features when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
 export const IS_CALCOM =
-  WEBAPP_URL &&
-  (new URL(WEBAPP_URL).hostname.endsWith("cal.com") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal.dev") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal.qa") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal-staging.com") ||
-    new URL(WEBAPP_URL).hostname.endsWith("cal.eu"));
+  process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1" ||
+  (WEBAPP_URL &&
+    (new URL(WEBAPP_URL).hostname.endsWith("cal.com") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal.dev") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal.qa") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal-staging.com") ||
+      new URL(WEBAPP_URL).hostname.endsWith("cal.eu")));
 
 export const CONSOLE_URL =
   new URL(WEBAPP_URL).hostname.endsWith(".cal.dev") ||

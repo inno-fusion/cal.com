@@ -32,6 +32,15 @@ export const isSAMLAdmin = (email: string) => {
 export const canAccessOrganization = async (user: { id: number; email: string }, teamId: number | null) => {
   const { id: userId, email } = user;
 
+  // ENTERPRISE BYPASS: Always allow access when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+  if (enterpriseBypass) {
+    return {
+      message: "success",
+      access: true,
+    };
+  }
+
   if (!isSAMLLoginEnabled) {
     return {
       message: "To enable this feature, add value for `SAML_DATABASE_URL` and `SAML_ADMINS` to your `.env`",

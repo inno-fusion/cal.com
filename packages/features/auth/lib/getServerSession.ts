@@ -70,9 +70,15 @@ export async function getServerSession(options: {
     return null;
   }
 
-  const deploymentRepo = new DeploymentRepository(prisma);
-  const licenseKeyService = await LicenseKeySingleton.getInstance(deploymentRepo);
-  const hasValidLicense = await licenseKeyService.checkLicense();
+  // ENTERPRISE BYPASS: Skip license check when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  let hasValidLicense: boolean;
+  if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
+    hasValidLicense = true;
+  } else {
+    const deploymentRepo = new DeploymentRepository(prisma);
+    const licenseKeyService = await LicenseKeySingleton.getInstance(deploymentRepo);
+    hasValidLicense = await licenseKeyService.checkLicense();
+  }
 
   let upId = token.upId;
 

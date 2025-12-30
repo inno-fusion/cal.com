@@ -21,7 +21,9 @@ const LicenseRequired = ({ children, as = "", ...rest }: LicenseRequiredProps) =
   const session = useSession();
   const { t } = useLocale();
   const Component = as || Fragment;
-  const hasValidLicense = session.data ? session.data.hasValidLicense : null;
+  // ENTERPRISE BYPASS: Treat license as valid when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  const enterpriseFeaturesEnabled = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+  const hasValidLicense = enterpriseFeaturesEnabled ? true : (session.data ? session.data.hasValidLicense : null);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "development" && hasValidLicense === false) {

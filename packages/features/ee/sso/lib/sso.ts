@@ -26,10 +26,14 @@ const getAllAcceptedMemberships = async ({ prisma, email }: { prisma: PrismaClie
 export const ssoTenantProduct = async (prisma: PrismaClient, email: string) => {
   const { connectionController } = await jackson();
 
+  // ENTERPRISE BYPASS: Allow SSO when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+  const enterpriseBypass = process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1";
+
   let memberships = await getAllAcceptedMemberships({ prisma, email });
 
   if (!memberships || memberships.length === 0) {
-    if (!HOSTED_CAL_FEATURES) throw new ErrorWithCode(ErrorCode.Unauthorized, "no_account_exists");
+    if (!HOSTED_CAL_FEATURES && !enterpriseBypass)
+      throw new ErrorWithCode(ErrorCode.Unauthorized, "no_account_exists");
 
     const domain = email.split("@")[1];
     const organizationRepository = getOrganizationRepository();
