@@ -6,6 +6,7 @@ ARG DATABASE_URL
 WORKDIR /calcom
 
 RUN set -eux;
+RUN apk add --no-cache python3 make g++ gcc libc-dev openssl-dev
 RUN ln -s /usr/lib/libssl.so.3 /lib/libssl.so.3
 
 ENV NODE_ENV="production"

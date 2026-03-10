@@ -19,6 +19,10 @@ export class DeploymentsService {
   ) {}
 
   async checkLicense() {
+    // ENTERPRISE BYPASS: Return valid when NEXT_PUBLIC_HOSTED_CAL_FEATURES=1
+    if (process.env.NEXT_PUBLIC_HOSTED_CAL_FEATURES === "1") {
+      return true;
+    }
     if (this.configService.get("e2e")) {
       return true;
     }
