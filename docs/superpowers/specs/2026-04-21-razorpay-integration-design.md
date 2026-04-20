@@ -197,7 +197,8 @@ packages/prisma/schema.prisma
 packages/i18n/locales/en/common.json
     # +~18 new translation keys
 
-# Regenerated via `yarn app-store build razorpay`
+# Regenerated via `yarn app-store-cli build` (regenerates ALL apps' manifests;
+# there is no per-app build; safe because the generator is deterministic)
 packages/app-store/apps.browser.generated.tsx
 packages/app-store/apps.keys-schemas.generated.ts
 packages/app-store/apps.metadata.generated.ts
@@ -223,13 +224,15 @@ export const appKeysSchema = z.object({
 
 Stored in `Credential.key` JSON with `Credential.type = "razorpay_payment"`. Same pattern as Stripe; secrets are not separately encrypted beyond Cal.com's existing `Credential` protections.
 
-Install flow in `api/_add.ts`:
+Install flow in `api/_add.ts`. Pull `appType`/`variant`/`slug` from `config.json` (same pattern as every other app — never hardcode; stays in sync with app-store-cli regenerations):
 
 ```ts
+import appConfig from "../config.json";
+
 const handler: AppDeclarativeHandler = {
-  appType: "razorpay_payment",
-  variant: "payment",
-  slug: "razorpay",
+  appType: appConfig.type,
+  variant: appConfig.variant,
+  slug: appConfig.slug,
   supportsMultipleInstalls: false,
   handlerType: "add",
   createCredential: ({ appType, user, slug, teamId }) =>
@@ -247,11 +250,11 @@ Method summary:
 | Method | Behaviour |
 |---|---|
 | `constructor({key})` | Parses via `appKeysSchema`. Stores credentials or null. Does NOT instantiate Razorpay client upfront; uses lazy getter to avoid "dummy key" constructions. |
-| `create(payment, bookingId, userId, username, bookerName, paymentOption, bookerEmail, bookerPhoneNumber?, eventTitle?, bookingTitle?)` | Requires `paymentOption === "ON_BOOKING"`. Builds truncated `notes` object (each value ≤ 256 chars, keys ≤ 15). Calls `razorpay.orders.create({amount, currency, receipt: "rcpt_" + uuid-8, notes})`. Writes `Payment` row with `externalId = order.id`, `data = {orderId, keyId, amount, currency, receipt}`. |
+| `create(payment, bookingId, userId, username, bookerName, paymentOption, bookerEmail, bookerPhoneNumber?, eventTitle?, bookingTitle?)` | Requires `paymentOption === "ON_BOOKING"`. Builds truncated `notes` object (each value ≤ 256 chars, keys ≤ 15). Calls `razorpay.orders.create({amount, currency, receipt: "rcpt_" + uuid-8, notes})`. **Omits `payment_capture` / `payment.capture` entirely** — razorpay-node defaults to auto-capture, which is exactly what ON_BOOKING wants. Writes `Payment` row with `externalId = order.id`, `data = {orderId, keyId, amount, currency, receipt}`, and critically `paymentOption: "ON_BOOKING"` in the Payment row (Cal.com's `handleCancelBooking.ts:598` filters payments by this value when deciding whether to trigger refund-on-cancellation — omitting it means refunds never fire). |
 | `collectCard()` | Throws `ErrorWithCode(ErrorCode.PaymentCreationFailure, "HOLD not supported for Razorpay")`. |
 | `chargeCard()` | Same — throws not-supported. |
 | `refund(paymentId)` | Loads payment. Short-circuits if already refunded. Errors if `success === false`. Calls `razorpay.payments.refund(data.paymentId, {amount: payment.amount})`. Updates `Payment.refunded = true` + `data.refundId, refundStatus, refundedAt`. Throws `ErrorWithCode` on SDK failure. |
-| `afterPayment(event, booking, paymentData, eventTypeMetadata?)` | Sends "awaiting payment" email+SMS via `sendAwaitingPaymentEmailAndSMS` with link from `createPaymentLink()`. Mirrors Stripe/PayPal exactly. |
+| `afterPayment(event, booking, paymentData, eventTypeMetadata?)` | Sends "awaiting payment" email+SMS via `sendAwaitingPaymentEmailAndSMS` (which is dispatched through Cal's `tasker` as `sendAwaitingPaymentEmail` so cancel-via-`tasker.cancelWithReference` works in `handlePaymentSuccess`) with link from `createPaymentLink()`. Mirrors Stripe/PayPal exactly — call the function, don't reinvent the tasker path. |
 | `deletePayment(paymentId)` | Hard delete via `prisma.payment.delete`. |
 | `update` / `getPaymentPaidStatus` / `getPaymentDetails` | Not implemented — throw. (Matches Stripe.) |
 | `isSetupAlready()` | `!!this.credentials`. |
@@ -283,23 +286,65 @@ Flow:
 
 1. Reject non-POST with 405.
 2. `verifyRequestSchema.safeParse(req.body)`; 400 on failure.
-3. Load `Payment` by `uid = paymentUid`, **using `select` not `include`**, pulling: `{id, externalId, booking: {uid, userId, eventType: {metadata}, user: {credentials: {where: {type: "razorpay_payment"}, select: {key: true}}}}}`.
+3. Load `Payment` by `uid = paymentUid`, using `select` not `include`, pulling: `{id, bookingId, externalId, appId, booking: {uid, userId, eventType: {teamId, metadata}}}`.
 4. 404 if not found.
 5. 400 if `payment.externalId !== razorpay_order_id`.
-6. Parse credential via `appKeysSchema`; 500 if missing or invalid.
-7. Verify signature via `verifyPaymentSignature(order_id, payment_id, signature, key_secret)` (our `lib/signatures.ts` wrapper that calls the SDK's `validatePaymentVerification` and re-checks via `crypto.timingSafeEqual`). 400 on mismatch.
-8. Store `razorpay_payment_id` into `Payment.data.paymentId` if not already set (so refunds have the id without waiting for webhook).
-9. Call `handlePaymentSuccess({ paymentId: payment.id, bookingId: payment.bookingId, appSlug: "razorpay", traceContext })`. This throws `HttpCode(200)` on success — catch it and treat as success signal.
+6. **Resolve credential using the team-or-user pattern from [processPaymentRefund.ts:41-48](../../../packages/features/bookings/lib/payment/processPaymentRefund.ts):**
+   ```ts
+   const where: Prisma.CredentialWhereInput = { appId: payment.appId };
+   if (payment.booking?.eventType?.teamId) where.teamId = payment.booking.eventType.teamId;
+   else where.userId = payment.booking?.userId;
+   const credential = await prisma.credential.findFirst({ where, select: { key: true } });
+   ```
+   500 if missing. Parse via `appKeysSchema`; 500 if invalid.
+7. Verify signature via `verifyPaymentSignature(order_id, payment_id, signature, key_secret)` (our `lib/signatures.ts` wrapper — calls the SDK's `validatePaymentVerification` AND re-checks via `crypto.timingSafeEqual`). 400 on mismatch.
+8. Atomically merge `razorpay_payment_id` into `Payment.data.paymentId` via `prisma.payment.update` (so refunds find the id without waiting for webhook).
+9. Call `handlePaymentSuccessIdempotent({ paymentId, bookingId, appSlug: "razorpay", traceContext })` (wrapper defined below).
 10. Return `{ success: true, bookingUid: payment.booking.uid }`.
 
-Idempotency: `handlePaymentSuccess` itself short-circuits if `Payment.success === true`. Second call from webhook is a no-op.
+#### 5.3.1 `handlePaymentSuccessIdempotent` helper
+
+The upstream [`handlePaymentSuccess`](../../../packages/app-store/_utils/payments/handlePaymentSuccess.ts) throws `HttpCode({statusCode: 200})` at the end as its success signal, and — more importantly — is **not itself idempotent**. Re-invocation after `Booking.status === ACCEPTED` still fires `sendScheduledEmailsAndSMS` (line 265), re-queues `BOOKING_PAID` webhook subscribers (line 187-200), and re-schedules workflow triggers (line 227-234). Duplicate emails, duplicate webhook deliveries, duplicate workflow execution.
+
+Since our architecture invokes `handlePaymentSuccess` from **both** `/verify` and the webhook, we must gate with our own idempotency wrapper. Lives in `packages/app-store/razorpay/lib/handlePaymentSuccessIdempotent.ts`:
+
+```ts
+import { HttpError as HttpCode } from "@calcom/lib/http-error";
+import { handlePaymentSuccess } from "@calcom/app-store/_utils/payments/handlePaymentSuccess";
+import { prisma } from "@calcom/prisma";
+
+export async function handlePaymentSuccessIdempotent(params: {
+  paymentId: number; bookingId: number; appSlug: string; traceContext: TraceContext;
+}) {
+  const payment = await prisma.payment.findUnique({
+    where: { id: params.paymentId },
+    select: { success: true },
+  });
+  if (payment?.success === true) {
+    log.info("Payment already marked success; skipping handlePaymentSuccess", params);
+    return;
+  }
+  try {
+    await handlePaymentSuccess(params);
+  } catch (e) {
+    if (e instanceof HttpCode && e.statusCode === 200) return; // upstream's "success"
+    throw e;
+  }
+}
+```
+
+The `Payment.success` gate is our idempotency token. `handlePaymentSuccess`'s inner transaction writes `Payment.success = true` atomically, so the TOCTOU window between check and action is the sub-millisecond interval where both callers could race. In that rare race both calls execute, producing duplicate emails once — acceptable for a self-hosted fork. If stricter guarantees are needed, migrate to `prisma.payment.updateMany({where:{id, success:false}, data:{success:true}})` as a pre-claim step.
+
+#### 5.3.2 Latency note
+
+`handlePaymentSuccess` performs external calendar API calls (`EventManager.create` iterates over destination-calendar credentials and hits Google/Office365), Cal.com webhook fan-out, and email dispatch. Typical wall-time: 2–8 seconds; can exceed 10 seconds with many calendar integrations. `/verify` blocks on this, so the booker's modal-handler `fetch` will hang accordingly. Acceptable in v1 because (a) the booker already completed payment — the "Pay" button is gone, (b) the fetch has no inherent timeout, (c) this is the same latency Stripe's `bookingSuccessRedirect` would have seen. Document in setup-page warning if measured latency is regularly > 10s.
 
 ### 5.4 Webhook endpoint
 
-Two-file pattern matching Stripe:
+Two-file pattern matching PayPal / BTCPay / HitPay (not Stripe — Stripe re-exports from `@calcom/features/ee/payments/api/webhook`, not its own app-store dir; our pattern is the self-contained one every other payment app uses):
 
 ```ts
-// apps/web/pages/api/integrations/razorpay/webhook.ts
+// apps/web/pages/api/integrations/razorpay/webhook.ts  (directory name "razorpay" must match)
 export { default } from "@calcom/app-store/razorpay/api/webhook";
 export const config = { api: { bodyParser: false } };
 ```
@@ -313,30 +358,34 @@ import { buffer } from "micro";
 Flow:
 
 1. Reject non-POST with 405.
-2. Read `x-razorpay-signature` (required) and `x-razorpay-event-id` (required per docs). 400 if either missing.
+2. Read `x-razorpay-signature` (required) and `x-razorpay-event-id` (required — Razorpay's canonical idempotency key per [docs](https://razorpay.com/docs/webhooks/best-practices/)). 400 if either missing.
 3. `const rawBody = (await buffer(req)).toString("utf8")`.
 4. **Dedup check** (persistent): `prisma.razorpayWebhookEvent.findUnique({ where: { eventId } })`. If exists → return 200 `{received:true, duplicate:true}` without further processing.
 5. Parse JSON to extract routing info (`event.event`, `event.payload.*.entity.order_id` or `payment_id`).
-6. Resolve the correct `webhook_secret`:
-   - If `payload.payment.entity.order_id`: look up `Payment.findFirst({where:{externalId: orderId}, select:{booking:{select:{user:{select:{credentials:{where:{type:"razorpay_payment"}, select:{key: true}}}}}}}})`.
-   - If `payload.refund.entity.payment_id`: look up `Payment.findFirst({where: {data: {path:["paymentId"], equals: paymentId}}, ...})`.
-   - If `payload.order.entity.id`: same as `orderId` lookup.
+6. Resolve the correct `webhook_secret`. Use the **same team-or-user credential pattern** as `/verify` — do NOT hardcode the relation path through `booking.user.credentials`, because that misses team-owned credentials:
+   - If `payload.payment.entity.order_id`: look up `Payment.findFirst({where:{externalId: orderId}, select:{appId, bookingId, booking:{select:{userId, eventType:{select:{teamId}}}}}})`, then query `Credential` with `{appId, teamId || userId}`.
+   - If `payload.refund.entity.payment_id`: look up `Payment.findFirst({where: {data: {path:["paymentId"], equals: paymentId}}, ...})` with the same selection, then same credential resolver.
+   - If `payload.order.entity.id`: treat as orderId lookup.
    - Fallback: `process.env.RAZORPAY_WEBHOOK_SECRET`.
 7. 500 if no secret resolvable.
-8. `verifyWebhookSignature(rawBody, signature, webhookSecret)` via `lib/signatures.ts` (SDK helper + timingSafeEqual). 400 on mismatch.
+8. `verifyWebhookSignature(rawBody, signature, webhookSecret)` via `lib/signatures.ts` (SDK helper + `timingSafeEqual`). 400 on mismatch.
 9. Insert dedup row: `prisma.razorpayWebhookEvent.create({data:{eventId}})`. If unique-violation race → treat as duplicate, return 200.
-10. **Respond 200 `{received:true}` immediately** to stay within Razorpay's 5-second budget.
-11. Call `processWebhookEvent(event)` **without awaiting** — fire-and-forget. Errors inside are logged via the sub-logger but never surface to Razorpay.
+10. **`await processWebhookEvent(event)`** — process inline. Rationale: (a) Cal.com's Stripe webhook awaits `handlePaymentSuccess` too ([features/ee/payments/api/webhook.ts:57-62](../../../packages/features/ee/payments/api/webhook.ts)) — this is the established pattern; (b) fire-and-forget after `res.end()` is killed by serverless runtimes; (c) if processing exceeds Razorpay's 5-second response budget, Razorpay retries, the retry hits our dedup row and returns 200 duplicate — net effect: processing completes once, one extra Razorpay retry. Acceptable. Errors are caught, logged, and the handler still returns 200 so the dedup row persists (a failure is not re-processable anyway without operator intervention).
+11. Respond 200 `{received:true}`.
+
+**Serverless caveat (future consideration):** if this fork is ever deployed to Vercel / AWS Lambda, replace the inline `await processWebhookEvent` with `await tasker.create("razorpayProcessWebhookEvent", { rawBody, eventId })` and move the processor into a tasker task. See `packages/features/tasker` for the pattern. Not needed for the v1 self-hosted target.
 
 `processWebhookEvent` (in `lib/webhookHandler.ts`, pure async function, no HTTP layer):
 
 ```
 switch (event.event):
   case "order.paid":
-    → loadPaymentByOrderId, if !success call handlePaymentSuccess
+    → loadPaymentByOrderId, call handlePaymentSuccessIdempotent
+      (wrapper — no-op if Payment.success is already true)
 
   case "payment.captured":
-    → same (safety net; order.paid is canonical)
+    → same (safety net; order.paid is canonical). handlePaymentSuccessIdempotent
+      is shared with /verify so no double-emails fire.
 
   case "payment.authorized":
     → info log + update data.authorizedAt; skip if already captured
@@ -388,7 +437,7 @@ Key behaviour:
   ```
 - `handler` response:
   - `{success: true, bookingUid}` → `window.location.href = "/booking/" + bookingUid`.
-  - any error → `window.location.reload()` (user retries with a fresh order).
+  - any error → `window.location.reload()`. Note: on reload, Cal.com's booking pipeline sees the existing `Payment` row (`Payment.success === false`, `externalId = oldOrderId`) and will skip `PaymentService.create` (no duplicate order). The existing Razorpay order stays `created`/`attempted`; stale orders are not garbage-collected in v1 — acceptable because Razorpay does not charge for uncaptured orders. Document this behaviour; if retry-rate is high in production, add an order-cleanup job.
 - `window.Razorpay` typed via ambient declaration in `packages/app-store/razorpay/lib/razorpay.d.ts`.
 
 ### 5.6 Setup page
@@ -422,6 +471,7 @@ Submit → `trpc.viewer.apps.updateAppCredentials.useMutation` → toast + redir
   - `NEVER` (default)
   - `ALWAYS`
   - `DAYS` → exposes `refundDaysCount` (number) + `refundCountCalendarDays` (checkbox).
+- **`paymentOption` is fixed to `ON_BOOKING`** and stored in both the app data (via `appDataSchema`) AND written into the Payment row at `PaymentService.create` time. `handleCancelBooking.ts:598` filters payments by `paymentOption === "ON_BOOKING"` before invoking `processPaymentRefund` — if the Payment row lacks this value, refund-on-cancellation silently skips our payments.
 
 Because Cal.com's `processPaymentRefund` already reads `appData.refundPolicy/refundDaysCount/refundCountCalendarDays` from event-type metadata, exposing these fields in the app data is sufficient — no additional wiring needed in the cancel flow.
 
@@ -475,9 +525,16 @@ export const webhookEventSchema = z.object({
 
 File: `packages/app-store/razorpay/lib/signatures.ts`.
 
+Razorpay's SDK (`razorpay@^2.9.6`) is pure JavaScript with no `exports` field, so deep imports work via `moduleResolution: "node"`. The README documents the exact path: `const { validatePaymentVerification } = require("razorpay/dist/utils/razorpay-utils");`. Centralise the two imports in `signatures.ts` so any future SDK reorg surfaces in one place. If the path breaks, the fallback is to reproduce the (trivial) HMAC implementations — both helpers are just `HMAC_SHA256(payload, secret) === signature`.
+
 ```ts
 import crypto from "node:crypto";
-import { validatePaymentVerification, validateWebhookSignature } from "razorpay/dist/utils/razorpay-utils";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { validatePaymentVerification, validateWebhookSignature } =
+  require("razorpay/dist/utils/razorpay-utils") as {
+    validatePaymentVerification: (params: { order_id: string; payment_id: string }, signature: string, secret: string) => boolean;
+    validateWebhookSignature: (body: string, signature: string, secret: string) => boolean;
+  };
 
 export function verifyPaymentSignature(
   orderId: string, paymentId: string, signature: string, keySecret: string
@@ -619,7 +676,7 @@ Port PR #25345's 45 tests, adapted to the new architecture:
 
 | Suite | Tests | New/Changed |
 |---|---|---|
-| `lib/__tests__/PaymentService.test.ts` | ~15 | Same scope. Updates: `collectCard`/`chargeCard` now assert "not supported" throws. `verifyPaymentSignature` tests moved to `signatures.test.ts`. |
+| `lib/__tests__/PaymentService.test.ts` | ~12 | Replace (not adapt) the PR's HOLD tests — they're against behaviour we no longer ship. Keep: init, create success/API-error, refund short-circuits on already-refunded, delete. New: assert `collectCard`/`chargeCard` throw "not supported"; assert `create` writes `paymentOption: "ON_BOOKING"` into the Payment row. `verifyPaymentSignature` tests moved to `signatures.test.ts`. |
 | `lib/__tests__/webhookHandler.test.ts` | ~14 | NEW: pure async dispatcher tests, one per event type. |
 | `lib/__tests__/signatures.test.ts` | ~6 | NEW: timing-safe wrapper tests — happy, invalid, SDK-true-but-ts-false edge case. |
 | `api/__tests__/verify.test.ts` | ~12 | Updates: mocks `handlePaymentSuccess` and asserts it's called on success. New test: `/verify` writes `paymentId` into `data` before calling handlePaymentSuccess. |
@@ -637,7 +694,9 @@ Lockfile regenerated via `yarn`.
 
 ## 11. Generated files
 
-Run `yarn app-store build razorpay` to regenerate:
+Run `yarn app-store-cli build` (the monorepo-root script `yarn app-store` maps to `yarn app-store-cli cli`, which is interactive; use `build` for non-interactive regeneration of all manifests). The generator doesn't accept a per-app filter, but it's deterministic over `config.json` + `package.json` of every app, so the diff will be scoped to razorpay-only entries as long as no other app changed since the last run.
+
+Regenerates all seven:
 - `packages/app-store/apps.browser.generated.tsx`
 - `packages/app-store/apps.keys-schemas.generated.ts`
 - `packages/app-store/apps.metadata.generated.ts`
@@ -646,7 +705,7 @@ Run `yarn app-store build razorpay` to regenerate:
 - `packages/app-store/bookerApps.metadata.generated.ts`
 - `packages/app-store/payment.services.generated.ts`
 
-Do not hand-edit. On future upstream rebase, re-run the same command to resync.
+Do not hand-edit. On future upstream rebase, re-run `yarn app-store-cli build` to resync.
 
 ## 12. What's excluded (vs PR #25345)
 
@@ -669,7 +728,8 @@ Do not hand-edit. On future upstream rebase, re-run the same command to resync.
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | Webhook misconfigured in Razorpay dashboard → confirmation emails never fire | Medium | `/verify` is the primary confirmation path; webhook is safety net. Setup page lists exact events to subscribe to. |
-| `handlePaymentSuccess` called twice (verify + webhook) | High (by design) | Idempotent — Cal.com's `Payment.success` gate prevents double-send. Prisma transaction keeps writes atomic. |
+| `handlePaymentSuccess` called twice (verify + webhook) → duplicate emails + duplicate `BOOKING_PAID` webhook deliveries | High (by design) | Wrapped in `handlePaymentSuccessIdempotent` (§5.3.1) which gates on `Payment.success === true`. Cal.com's upstream `handlePaymentSuccess` is NOT idempotent on its own — never call it directly from our code paths. |
+| `/verify` response latency (2–10s typical due to external calendar API calls inside `handlePaymentSuccess`) | Medium | Client's fetch has no hard timeout; booker sees "Loading…" briefly. If it exceeds 20s regularly, either (a) defer `handlePaymentSuccess` into Cal's tasker in both `/verify` and webhook paths, or (b) short-circuit `/verify` to only mark `Payment.success = true` and let the webhook run the full pipeline (accept the brief window where `/booking/[uid]` shows the pre-accept state). v1: accept the latency. |
 | `razorpay-node` breaking change | Low | Pinned to `^2.9.6`; no 3.x on horizon per GitHub. Wrapper isolates API surface. |
 | Cal.com core `RefundPolicy` enum changes | Low | Spec imports from single source `packages/lib/payment/types.ts`; rename is a compile-time error. |
 | Dedup table grows unbounded | Low | ~500 KB/year expected; manual prune acceptable for fork. |
