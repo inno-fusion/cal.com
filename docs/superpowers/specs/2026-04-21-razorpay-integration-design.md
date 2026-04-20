@@ -131,8 +131,7 @@ processPaymentRefund (existing Cal.com)
 
 ```
 packages/app-store/razorpay/
-├── _metadata.ts
-├── config.json                   # regenerated via app-store-cli
+├── config.json                   # regenerated via app-store-cli (canonical metadata source)
 ├── index.ts                      # public exports
 ├── package.json                  # @calcom/razorpay, deps: razorpay@^2.9.6, uuid
 ├── icon.svg
@@ -154,7 +153,7 @@ packages/app-store/razorpay/
 │       └── webhookHandler.test.ts
 ├── api/
 │   ├── index.ts
-│   ├── _add.ts
+│   ├── add.ts
 │   ├── verify.ts
 │   ├── webhook.ts
 │   └── __tests__/
@@ -224,7 +223,7 @@ export const appKeysSchema = z.object({
 
 Stored in `Credential.key` JSON with `Credential.type = "razorpay_payment"`. Same pattern as Stripe; secrets are not separately encrypted beyond Cal.com's existing `Credential` protections.
 
-Install flow in `api/_add.ts`. Pull `appType`/`variant`/`slug` from `config.json` (same pattern as every other app — never hardcode; stays in sync with app-store-cli regenerations):
+Install flow in `api/add.ts` (no leading underscore — convention across all Cal.com apps is `add.ts`; the app-store CLI's re-export uses `export { default as add } from "./add"` so an underscored filename would break key inference). Pull `appType`/`variant`/`slug` from `config.json` (same pattern as every other app — never hardcode; stays in sync with app-store-cli regenerations):
 
 ```ts
 import appConfig from "../config.json";
@@ -369,9 +368,11 @@ Flow:
    - Fallback: `process.env.RAZORPAY_WEBHOOK_SECRET`.
 7. 500 if no secret resolvable.
 8. `verifyWebhookSignature(rawBody, signature, webhookSecret)` via `lib/signatures.ts` (SDK helper + `timingSafeEqual`). 400 on mismatch.
-9. Insert dedup row: `prisma.razorpayWebhookEvent.create({data:{eventId}})`. If unique-violation race → treat as duplicate, return 200.
-10. **`await processWebhookEvent(event)`** — process inline. Rationale: (a) Cal.com's Stripe webhook awaits `handlePaymentSuccess` too ([features/ee/payments/api/webhook.ts:57-62](../../../packages/features/ee/payments/api/webhook.ts)) — this is the established pattern; (b) fire-and-forget after `res.end()` is killed by serverless runtimes; (c) if processing exceeds Razorpay's 5-second response budget, Razorpay retries, the retry hits our dedup row and returns 200 duplicate — net effect: processing completes once, one extra Razorpay retry. Acceptable. Errors are caught, logged, and the handler still returns 200 so the dedup row persists (a failure is not re-processable anyway without operator intervention).
+9. **`await processWebhookEvent(event)`** — process inline, BEFORE inserting the dedup row. Rationale for inline-await: (a) Cal.com's Stripe webhook awaits `handlePaymentSuccess` too ([features/ee/payments/api/webhook.ts:57-62](../../../packages/features/ee/payments/api/webhook.ts)) — established pattern; (b) fire-and-forget after `res.end()` is killed by serverless runtimes; (c) if processing exceeds Razorpay's 5-second response budget, Razorpay retries — we handle that next. On error: **do not insert the dedup row**, log the error, and return a 5xx so Razorpay retries. (If the error is a bug we introduced, logs + alerts will catch it; Razorpay's 24-hour retry window gives us time to ship a fix.)
+10. On success, insert the dedup row: `prisma.razorpayWebhookEvent.create({data:{eventId}})`. On unique-violation (Razorpay re-delivered while we were processing the first copy — small but possible window) treat as an already-seen event and move on. The processing itself is idempotent via `handlePaymentSuccessIdempotent` (and via idempotent DB writes for refund events), so the narrow double-processing window has no user-visible effect beyond wasted work.
 11. Respond 200 `{received:true}`.
+
+**Ordering trade-off recorded explicitly:** insert-dedup-after-success means a concurrent Razorpay retry during a slow first-invocation *can* double-process. Razorpay's retry schedule is exponential with minute-scale first backoff, so the concurrent window is narrow in practice. The alternative (insert-dedup-first, delete-on-failure) makes the "safety net on transient failures" property of the webhook hollow, since a single transient error permanently swallows the event. We choose recoverability over theoretical race-tightness.
 
 **Serverless caveat (future consideration):** if this fork is ever deployed to Vercel / AWS Lambda, replace the inline `await processWebhookEvent` with `await tasker.create("razorpayProcessWebhookEvent", { rawBody, eventId })` and move the processor into a tasker task. See `packages/features/tasker` for the pattern. Not needed for the v1 self-hosted target.
 
@@ -471,7 +472,7 @@ Submit → `trpc.viewer.apps.updateAppCredentials.useMutation` → toast + redir
   - `NEVER` (default)
   - `ALWAYS`
   - `DAYS` → exposes `refundDaysCount` (number) + `refundCountCalendarDays` (checkbox).
-- **`paymentOption` is fixed to `ON_BOOKING`** and stored in both the app data (via `appDataSchema`) AND written into the Payment row at `PaymentService.create` time. `handleCancelBooking.ts:598` filters payments by `paymentOption === "ON_BOOKING"` before invoking `processPaymentRefund` — if the Payment row lacks this value, refund-on-cancellation silently skips our payments.
+- **`paymentOption` is fixed to `ON_BOOKING`** and stored in both the app data (via `appDataSchema`) AND written into the Payment row at `PaymentService.create` time (matches Stripe at [stripepayment/lib/PaymentService.ts:135](../../../packages/app-store/stripepayment/lib/PaymentService.ts)). `handleCancelBooking.ts:598` filters payments by `paymentOption === "ON_BOOKING"` before invoking `processPaymentRefund` — if the Payment row lacks this value, refund-on-cancellation silently skips our payments. Note: PayPal's `PaymentService.create` does NOT write this field, meaning PayPal's refund-on-cancellation path is silently broken upstream. Do NOT "align with PayPal" on this point — align with Stripe.
 
 Because Cal.com's `processPaymentRefund` already reads `appData.refundPolicy/refundDaysCount/refundCountCalendarDays` from event-type metadata, exposing these fields in the app data is sufficient — no additional wiring needed in the cancel flow.
 
@@ -728,7 +729,8 @@ Do not hand-edit. On future upstream rebase, re-run `yarn app-store-cli build` t
 | Risk | Likelihood | Mitigation |
 |---|---|---|
 | Webhook misconfigured in Razorpay dashboard → confirmation emails never fire | Medium | `/verify` is the primary confirmation path; webhook is safety net. Setup page lists exact events to subscribe to. |
-| `handlePaymentSuccess` called twice (verify + webhook) → duplicate emails + duplicate `BOOKING_PAID` webhook deliveries | High (by design) | Wrapped in `handlePaymentSuccessIdempotent` (§5.3.1) which gates on `Payment.success === true`. Cal.com's upstream `handlePaymentSuccess` is NOT idempotent on its own — never call it directly from our code paths. |
+| `handlePaymentSuccess` called twice (verify + webhook) → duplicate emails + duplicate `BOOKING_PAID` webhook deliveries + duplicate `EventManager.create` calendar writes | High (by design) | Wrapped in `handlePaymentSuccessIdempotent` (§5.3.1) which gates on `Payment.success === true`. Cal.com's upstream `handlePaymentSuccess` is NOT idempotent on its own — **every side effect** (calendar creation at L83, `BOOKING_PAID` fan-out at L187-203, workflow scheduling at L227-234, `sendScheduledEmailsAndSMS` at L265) re-fires on re-invocation. Never call it directly from our code paths. |
+| Sub-millisecond race between `/verify` and webhook concurrent calls → both pass the wrapper's `success=false` check, both call `handlePaymentSuccess` → duplicate BOOKING_PAID webhooks + duplicate calendar events | Low | The wrapper's `findUnique` → call is a TOCTOU window of microseconds in the race-case where webhook lands while `/verify` is still mid-flight. Accepted for v1. Hardening path if needed: `prisma.payment.updateMany({where:{id, success:false}, data:{success:true}}) → count` as an atomic claim, then call a refactored variant of `handlePaymentSuccess` that skips its own success flag write. Not worth the refactor complexity for this fork. |
 | `/verify` response latency (2–10s typical due to external calendar API calls inside `handlePaymentSuccess`) | Medium | Client's fetch has no hard timeout; booker sees "Loading…" briefly. If it exceeds 20s regularly, either (a) defer `handlePaymentSuccess` into Cal's tasker in both `/verify` and webhook paths, or (b) short-circuit `/verify` to only mark `Payment.success = true` and let the webhook run the full pipeline (accept the brief window where `/booking/[uid]` shows the pre-accept state). v1: accept the latency. |
 | `razorpay-node` breaking change | Low | Pinned to `^2.9.6`; no 3.x on horizon per GitHub. Wrapper isolates API surface. |
 | Cal.com core `RefundPolicy` enum changes | Low | Spec imports from single source `packages/lib/payment/types.ts`; rename is a compile-time error. |
@@ -749,6 +751,7 @@ Do not hand-edit. On future upstream rebase, re-run `yarn app-store-cli build` t
    f. Cancel the booking → verify `Payment.refunded = true`, refund visible in Razorpay dashboard.
    g. Simulate duplicate webhook delivery → verify dedup row, 200 response.
 4. Run CI gates locally: `yarn type-check:ci --force`, `yarn biome check --write .`, `TZ=UTC yarn test`.
+4a. After running `yarn app-store-cli build`, run `git diff --name-only packages/app-store/*.generated.*` and eyeball-inspect — the diff should only add `razorpay` entries. If other apps show in the diff, another in-tree change drifted the generator input; investigate before committing.
 5. Commit in logical units (one prep commit + schema + service + API + UI + generated + tests).
 6. Tag as `v6.2.1` for the self-hosted fork.
 
