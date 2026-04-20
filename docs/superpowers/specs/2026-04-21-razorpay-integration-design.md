@@ -134,9 +134,10 @@ packages/app-store/razorpay/
 ├── config.json                   # regenerated via app-store-cli (canonical metadata source)
 ├── index.ts                      # public exports
 ├── package.json                  # @calcom/razorpay, deps: razorpay@^2.9.6, uuid
-├── icon.svg
 ├── DESCRIPTION.md
-├── README.md
+├── README.md                     # Must include Razorpay trademark notice +
+│                                 # link to razorpay.com/newsroom/brand-assets/
+│                                 # Usage Agreement.
 ├── zod.ts
 ├── lib/
 │   ├── PaymentService.ts
@@ -165,7 +166,16 @@ packages/app-store/razorpay/
 ├── pages/
 │   └── setup/
 │       └── _getServerSideProps.tsx
-└── static/razorpay{1..5}.png
+└── static/
+    ├── icon.svg                   # OFFICIAL Razorpay brand asset, downloaded
+    │                              # from https://razorpay.com/newsroom/brand-assets/
+    │                              # (NOT the stylised inline SVG from PR #25345).
+    │                              # Subject to Razorpay's Usage Agreement — using
+    │                              # the logo to identify the Razorpay service
+    │                              # inside an integration is the intended use.
+    │                              # README.md must note the trademark.
+    └── razorpay{1..5}.jpg         # JPEG not PNG (matches stripepayment/paypal
+                                   # convention; smaller bundle).
 
 apps/web/pages/api/integrations/razorpay/
 └── webhook.ts                    # thin re-export with bodyParser:false (Stripe pattern)
@@ -223,6 +233,8 @@ export const appKeysSchema = z.object({
 
 Stored in `Credential.key` JSON with `Credential.type = "razorpay_payment"`. Same pattern as Stripe; secrets are not separately encrypted beyond Cal.com's existing `Credential` protections.
 
+**Scope decision — user-level installs only for v1.** `trpc.viewer.apps.updateAppCredentials.handler.ts:43-48` looks up credentials with `{id: credentialId, userId: user.id}` — there's no team-scoped update path. If we allowed team-level installs, rotating `key_secret` or `webhook_secret` later would require direct DB edits. For v1, pass `teamId: undefined` (equivalent to not passing it) into `createDefaultInstallation`, and document that team-wide Razorpay must wait for Cal.com to add team-credential UI. This mirrors Cal.com's organizer-level credential model that `RegularBookingService.ts:2551-2570` already assumes on the create path.
+
 Install flow in `api/add.ts` (no leading underscore — convention across all Cal.com apps is `add.ts`; the app-store CLI's re-export uses `export { default as add } from "./add"` so an underscored filename would break key inference). Pull `appType`/`variant`/`slug` from `config.json` (same pattern as every other app — never hardcode; stays in sync with app-store-cli regenerations):
 
 ```ts
@@ -234,8 +246,9 @@ const handler: AppDeclarativeHandler = {
   slug: appConfig.slug,
   supportsMultipleInstalls: false,
   handlerType: "add",
-  createCredential: ({ appType, user, slug, teamId }) =>
-    createDefaultInstallation({ appType, user, slug, key: {}, teamId }),
+  // v1: user-level install only. Do NOT forward teamId — see §5.1 scope decision.
+  createCredential: ({ appType, user, slug }) =>
+    createDefaultInstallation({ appType, user, slug, key: {} }),
   redirect: { newTab: false, url: "/apps/razorpay/setup" },
 };
 ```
@@ -249,7 +262,7 @@ Method summary:
 | Method | Behaviour |
 |---|---|
 | `constructor({key})` | Parses via `appKeysSchema`. Stores credentials or null. Does NOT instantiate Razorpay client upfront; uses lazy getter to avoid "dummy key" constructions. |
-| `create(payment, bookingId, userId, username, bookerName, paymentOption, bookerEmail, bookerPhoneNumber?, eventTitle?, bookingTitle?)` | Requires `paymentOption === "ON_BOOKING"`. Builds truncated `notes` object (each value ≤ 256 chars, keys ≤ 15). Calls `razorpay.orders.create({amount, currency, receipt: "rcpt_" + uuid-8, notes})`. **Omits `payment_capture` / `payment.capture` entirely** — razorpay-node defaults to auto-capture, which is exactly what ON_BOOKING wants. Writes `Payment` row with `externalId = order.id`, `data = {orderId, keyId, amount, currency, receipt}`, and critically `paymentOption: "ON_BOOKING"` in the Payment row (Cal.com's `handleCancelBooking.ts:598` filters payments by this value when deciding whether to trigger refund-on-cancellation — omitting it means refunds never fire). |
+| `create(payment, bookingId, userId, username, bookerName, paymentOption, bookerEmail, bookerPhoneNumber?, eventTitle?, bookingTitle?)` | Requires `paymentOption === "ON_BOOKING"`. Builds truncated `notes` object (each value ≤ 256 chars, keys ≤ 15). Uses `receipt: "rcpt_" + bookingId + "_" + uuid-6` (semantically unique per booking, collision-resistant for retries). Calls `razorpay.orders.create({amount, currency, receipt, notes})`. **Omits `payment_capture` / `payment.capture` entirely** — razorpay-node defaults to auto-capture, which is exactly what ON_BOOKING wants. Writes `Payment` row with `externalId = order.id`, `data = {orderId, keyId, amount, currency, receipt}`, and critically `paymentOption: "ON_BOOKING"` in the Payment row. Errors thrown as `ErrorWithCode(ErrorCode.PaymentCreationFailure, "razorpay_payment_not_created")` — NOT a bare `new Error(...)`, to follow Cal.com's error-code pattern and give the booker a translatable message. On error, the Cal.com booking row still exists in pending state (no upstream rollback — matches Stripe/PayPal behaviour); see §13 risk row. |
 | `collectCard()` | Throws `ErrorWithCode(ErrorCode.PaymentCreationFailure, "HOLD not supported for Razorpay")`. |
 | `chargeCard()` | Same — throws not-supported. |
 | `refund(paymentId)` | Loads payment. Short-circuits if already refunded. Errors if `success === false`. Calls `razorpay.payments.refund(data.paymentId, {amount: payment.amount})`. Updates `Payment.refunded = true` + `data.refundId, refundStatus, refundedAt`. Throws `ErrorWithCode` on SDK failure. |
@@ -288,14 +301,14 @@ Flow:
 3. Load `Payment` by `uid = paymentUid`, using `select` not `include`, pulling: `{id, bookingId, externalId, appId, booking: {uid, userId, eventType: {teamId, metadata}}}`.
 4. 404 if not found.
 5. 400 if `payment.externalId !== razorpay_order_id`.
-6. **Resolve credential using the team-or-user pattern from [processPaymentRefund.ts:41-48](../../../packages/features/bookings/lib/payment/processPaymentRefund.ts):**
+6. **Resolve credential — userId-only, matching `RegularBookingService.ts:2551-2570`'s create path:**
    ```ts
-   const where: Prisma.CredentialWhereInput = { appId: payment.appId };
-   if (payment.booking?.eventType?.teamId) where.teamId = payment.booking.eventType.teamId;
-   else where.userId = payment.booking?.userId;
-   const credential = await prisma.credential.findFirst({ where, select: { key: true } });
+   const credential = await prisma.credential.findFirst({
+     where: { appId: payment.appId, userId: payment.booking?.userId },
+     select: { key: true },
+   });
    ```
-   500 if missing. Parse via `appKeysSchema`; 500 if invalid.
+   500 if missing. Parse via `appKeysSchema`; 500 if invalid. This is consistent across the three code paths (create / verify / webhook) and respects the v1 user-level-only scope decision in §5.1. `processPaymentRefund`'s team-or-user pattern is the outlier — Cal.com itself is inconsistent here, but we stay on the create-side pattern.
 7. Verify signature via `verifyPaymentSignature(order_id, payment_id, signature, key_secret)` (our `lib/signatures.ts` wrapper — calls the SDK's `validatePaymentVerification` AND re-checks via `crypto.timingSafeEqual`). 400 on mismatch.
 8. Atomically merge `razorpay_payment_id` into `Payment.data.paymentId` via `prisma.payment.update` (so refunds find the id without waiting for webhook).
 9. Call `handlePaymentSuccessIdempotent({ paymentId, bookingId, appSlug: "razorpay", traceContext })` (wrapper defined below).
@@ -361,9 +374,9 @@ Flow:
 3. `const rawBody = (await buffer(req)).toString("utf8")`.
 4. **Dedup check** (persistent): `prisma.razorpayWebhookEvent.findUnique({ where: { eventId } })`. If exists → return 200 `{received:true, duplicate:true}` without further processing.
 5. Parse JSON to extract routing info (`event.event`, `event.payload.*.entity.order_id` or `payment_id`).
-6. Resolve the correct `webhook_secret`. Use the **same team-or-user credential pattern** as `/verify` — do NOT hardcode the relation path through `booking.user.credentials`, because that misses team-owned credentials:
-   - If `payload.payment.entity.order_id`: look up `Payment.findFirst({where:{externalId: orderId}, select:{appId, bookingId, booking:{select:{userId, eventType:{select:{teamId}}}}}})`, then query `Credential` with `{appId, teamId || userId}`.
-   - If `payload.refund.entity.payment_id`: look up `Payment.findFirst({where: {data: {path:["paymentId"], equals: paymentId}}, ...})` with the same selection, then same credential resolver.
+6. Resolve the correct `webhook_secret`. Use **userId-only lookup**, matching `/verify` (§5.3 step 6) and `RegularBookingService`'s create path:
+   - If `payload.payment.entity.order_id`: look up `Payment.findFirst({where:{externalId: orderId}, select:{appId, bookingId, booking:{select:{userId}}}})`, then query `Credential` with `{appId, userId: payment.booking.userId}`.
+   - If `payload.refund.entity.payment_id`: look up `Payment.findFirst({where: {data: {path:["paymentId"], equals: paymentId}}, ...})` with the same selection, same resolver.
    - If `payload.order.entity.id`: treat as orderId lookup.
    - Fallback: `process.env.RAZORPAY_WEBHOOK_SECRET`.
 7. 500 if no secret resolvable.
@@ -432,7 +445,7 @@ Key behaviour:
     handler: (resp) => POST /api/integrations/razorpay/verify,
     modal: { ondismiss: () => {/* no-op; server state untouched */} },
     retry: { enabled: false },
-    prefill: { email, name } from URLSearchParams,
+    prefill: { email, name, contact } from props.booking.attendees[0] (NOT URL query — PaymentPage's getServerSideProps does NOT append email/name to the URL; the PR's URLSearchParams read yields empty strings. contact is E.164-normalised if available; omit if missing rather than pass a malformed value which Razorpay's checkout rejects),
     theme: { color: "#292929" }
   }
   ```
@@ -455,7 +468,7 @@ Warning banner above the form:
 > `t("razorpay_international_payments_warning")` — non-INR currencies require international-payments enabled on the Razorpay account.
 
 Below the form, numbered setup instructions listing:
-- Webhook URL: `${origin}/api/integrations/razorpay/webhook`
+- Webhook URL: `` `${WEBAPP_URL}/api/integrations/razorpay/webhook` `` (import `WEBAPP_URL` from `@calcom/lib/constants` — matches the BtcPay setup pattern at [apps/web/components/apps/btcpayserver/Setup.tsx:161,246](../../../apps/web/components/apps/btcpayserver/Setup.tsx); `window.location.origin` would route webhooks to an org subdomain rather than the canonical host)
 - Required events: `order.paid`, `payment.captured`, `payment.failed`, `refund.created`, `refund.processed`, `refund.failed`, `refund.speed_changed`.
 
 Submit → `trpc.viewer.apps.updateAppCredentials.useMutation` → toast + redirect to `/event-types`.
@@ -530,7 +543,7 @@ Razorpay's SDK (`razorpay@^2.9.6`) is pure JavaScript with no `exports` field, s
 
 ```ts
 import crypto from "node:crypto";
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// biome-ignore lint/style/noCommonJs: razorpay-node ships no exports map and no ESM build
 const { validatePaymentVerification, validateWebhookSignature } =
   require("razorpay/dist/utils/razorpay-utils") as {
     validatePaymentVerification: (params: { order_id: string; payment_id: string }, signature: string, secret: string) => boolean;
@@ -603,10 +616,11 @@ model RazorpayWebhookEvent {
 }
 ```
 
-Migration:
+Two migrations (create separately so naming + intent stay clear):
+
+**Migration A — `YYYYMMDDHHMMSS_add_razorpay_webhook_event_model`** (`yarn prisma migrate dev --name add_razorpay_webhook_event_model` emits the real UTC timestamp):
 
 ```sql
--- packages/prisma/migrations/<timestamp>_add_razorpay_webhook_event/migration.sql
 CREATE TABLE "RazorpayWebhookEvent" (
   "eventId" TEXT NOT NULL,
   "receivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -616,7 +630,17 @@ CREATE TABLE "RazorpayWebhookEvent" (
 CREATE INDEX "RazorpayWebhookEvent_receivedAt_idx" ON "RazorpayWebhookEvent"("receivedAt");
 ```
 
-Estimated row size ~50 B. At ~10k events/year → ~500 KB/year. No cleanup job in v1; document a manual prune query for > 30-day-old rows.
+**Migration B — `YYYYMMDDHHMMSS_seed_razorpay_app`** (same shape as `packages/prisma/migrations/20220525182228_cal_video_preinstalled/migration.sql`):
+
+```sql
+INSERT INTO "App" ("slug", "dirName", "categories", "keys", "createdAt", "updatedAt", "enabled")
+VALUES ('razorpay', 'razorpay', '{payment}'::"AppCategories"[], '{}'::jsonb, NOW(), NOW(), true)
+ON CONFLICT ("slug") DO NOTHING;
+```
+
+Rationale: `packages/app-store/_utils/handlePayment.ts:53` joins `Payment` to `App` by `dirName`, and `handleCancelBooking.ts:600` reads `successPayment.appId`. Without the `App` row, paid bookings will 500 on confirmation. Cal.com's app-store-cli **does not** write the `App` table — app-store-cli generates manifest files (TypeScript), not DB rows. `App` rows are seeded via migrations (see cal_video_preinstalled precedent) OR via the dashboard Admin UI. For a clean `yarn prisma migrate deploy` on a fresh DB, the seed migration must exist.
+
+Estimated `RazorpayWebhookEvent` row size ~50 B. At ~10k events/year → ~500 KB/year. No cleanup job in v1; document a manual prune query for > 30-day-old rows.
 
 ## 6. Security
 
@@ -687,7 +711,7 @@ Run with `TZ=UTC yarn test packages/app-store/razorpay --run`.
 
 ## 10. Third-party dependencies
 
-- Add `razorpay@^2.9.6` to `packages/app-store/razorpay/package.json` (new workspace).
+- Add `razorpay@^2.9.6` to `packages/app-store/razorpay/package.json` (new workspace). Note: Razorpay's own [Node.js integration docs](https://razorpay.com/docs/payments/server-integration/nodejs/) recommend Node 22.2+, but the SDK's `package.json` has no `engines` field and works on Node 20.17 (Cal.com's current CI version) in practice. Track upstream's engines field on SDK upgrades; if they add a hard Node 22+ constraint, coordinate a Cal.com-wide Node bump before upgrading.
 - Add `uuid@^9.0.0` as a local dep (already transitively available, but explicit keeps the workspace self-contained).
 - No other new deps.
 
@@ -712,6 +736,7 @@ Do not hand-edit. On future upstream rebase, re-run `yarn app-store-cli build` t
 
 | Excluded | Reason |
 |---|---|
+| Team-level installs | §5.1 scope decision — `updateAppCredentials` tRPC handler is user-scoped; keys can't be rotated cleanly without upstream work. Users can install Razorpay individually. |
 | HOLD payment option + `collectCard`/`chargeCard` implementations | Scope decision: auto-capture only. |
 | Refund policy UI's hour-level granularity | Cal.com native is day-level; extending core is non-goal for fork. |
 | In-memory `Set` dedup | Broken across replicas; replaced with DB. |
@@ -736,7 +761,11 @@ Do not hand-edit. On future upstream rebase, re-run `yarn app-store-cli build` t
 | Cal.com core `RefundPolicy` enum changes | Low | Spec imports from single source `packages/lib/payment/types.ts`; rename is a compile-time error. |
 | Dedup table grows unbounded | Low | ~500 KB/year expected; manual prune acceptable for fork. |
 | Notes exceed Razorpay 256-char-per-value limit | Low | `truncateNote` helper caps each value before `orders.create`. |
-| Future upstream rebase conflicts on generated files | High | Expected; re-run `yarn app-store build razorpay` after rebase. |
+| Future upstream rebase conflicts on generated files | High | Expected; re-run `yarn app-store-cli build` after rebase. |
+| Razorpay API unavailable during booking → `PaymentService.create` throws → Cal.com booking persists in pending state (not rolled back by the upstream pipeline) | Low | Matches Stripe/PayPal behaviour on the same failure. Booker receives HTTP 500. Host must manually cancel the orphaned booking from the Cal.com dashboard. Document in setup instructions. Monitoring recommendation: alert on `PaymentCreationFailure` error rate > 1%. |
+| `/verify` or webhook in embed mode (iframe) — Razorpay's `checkout.js` uses window-level overlays; parent `Cross-Origin-Opener-Policy` / `frame-ancestors` may block | Unknown | Not tested in v1. Document as "embed-mode Razorpay bookings not officially supported; test in your embed before enabling." |
+| Team installs Razorpay but needs to rotate keys | N/A v1 | Team-level install disabled in v1 (§5.1). If a team install is needed later, add team-scoped credential update via direct DB edit or a custom tRPC mutation. |
+| Monitoring gap — no alert on `/verify` latency > 20s or webhook-handler error rate | Medium | v1 ships without monitoring; add a recommendation in rollout §14 step 6 to wire Cal.com's existing log sink to observability for `razorpay-verify` and `razorpay-webhook` sub-loggers. |
 
 ## 14. Rollout plan
 
