@@ -1,0 +1,21 @@
+{
+  "name": "Razorpay",
+  "slug": "razorpay",
+  "type": "razorpay_payment",
+  "logo": "icon.svg",
+  "imageSrc": "icon.svg",
+  "url": "https://razorpay.com",
+  "variant": "payment",
+  "categories": ["payment"],
+  "publisher": "Cal.com",
+  "email": "help@razorpay.com",
+  "description": "Accept payments via UPI, Cards, and Netbanking using Razorpay.",
+  "extendsFeature": "EventType",
+  "isTemplate": false,
+  "__createdUsingCli": true,
+  "__template": "event-type-app-card",
+  "dirName": "razorpay",
+  "location": {
+    "integrations": "integrations:razorpay"
+  }
+}

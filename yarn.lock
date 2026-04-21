@@ -2735,7 +2735,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@calcom/lib@workspace:*, @calcom/lib@workspace:packages/lib":
+"@calcom/lib@npm:*, @calcom/lib@workspace:*, @calcom/lib@workspace:packages/lib":
   version: 0.0.0-use.local
   resolution: "@calcom/lib@workspace:packages/lib"
   dependencies:
@@ -2989,6 +2989,19 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@calcom/razorpay@workspace:packages/app-store/razorpay":
+  version: 0.0.0-use.local
+  resolution: "@calcom/razorpay@workspace:packages/app-store/razorpay"
+  dependencies:
+    "@calcom/lib": "npm:*"
+    "@calcom/types": "npm:*"
+    "@calcom/ui": "npm:*"
+    "@types/uuid": "npm:^9.0.1"
+    razorpay: "npm:^2.9.6"
+    uuid: "npm:^9.0.0"
+  languageName: unknown
+  linkType: soft
+
 "@calcom/riverside@workspace:packages/app-store/riverside":
   version: 0.0.0-use.local
   resolution: "@calcom/riverside@workspace:packages/app-store/riverside"
@@ -3200,7 +3213,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@calcom/types@workspace:*, @calcom/types@workspace:packages/types":
+"@calcom/types@npm:*, @calcom/types@workspace:*, @calcom/types@workspace:packages/types":
   version: 0.0.0-use.local
   resolution: "@calcom/types@workspace:packages/types"
   dependencies:
@@ -3208,7 +3221,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@calcom/ui@workspace:*, @calcom/ui@workspace:packages/ui":
+"@calcom/ui@npm:*, @calcom/ui@workspace:*, @calcom/ui@workspace:packages/ui":
   version: 0.0.0-use.local
   resolution: "@calcom/ui@workspace:packages/ui"
   dependencies:
@@ -33194,6 +33207,15 @@ __metadata:
     iconv-lite: "npm:~0.7.0"
     unpipe: "npm:~1.0.0"
   checksum: 10/4168c82157bd69175d5bd960e59b74e253e237b358213694946a427a6f750a18b8e150f036fed3421b3e83294b071a4e2bb01037a79ccacdac05360c63d3ebba
+  languageName: node
+  linkType: hard
+
+"razorpay@npm:^2.9.6":
+  version: 2.9.6
+  resolution: "razorpay@npm:2.9.6"
+  dependencies:
+    axios: "npm:^1.6.8"
+  checksum: 10/122d8f2faa37a1a6966477a6bd3bda1a84717a9bd2ffd132f1ffa9d0b345edf1ea5af95fa0cc87c5415fdf352bd8b44e7a5750e47c2291494efe57b228ce6131
   languageName: node
   linkType: hard
 

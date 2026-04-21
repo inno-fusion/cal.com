@@ -3338,3 +3338,10 @@ model RoutingTrace {
   assignmentReasonId Int?              @unique
   assignmentReason   AssignmentReason? @relation(fields: [assignmentReasonId], references: [id], onDelete: Cascade)
 }
+
+model RazorpayWebhookEvent {
+  eventId    String   @id
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}
